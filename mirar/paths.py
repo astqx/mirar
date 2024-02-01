@@ -12,7 +12,8 @@ logger = logging.getLogger(__name__)
 base_code_dir = Path(__file__).parent.parent.resolve()
 
 PACKAGE_NAME = "mirar"
-__version__ = metadata.version(__package__)
+# __version__ = metadata.version(__package__)
+__version__ = "0.10.2"
 
 doc_dir = base_code_dir.joinpath("docs/")
 

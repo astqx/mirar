@@ -1,5 +1,5 @@
 """
-Module for querying GAIA catalog
+Module for querying Gaia DR3 catalog
 """
 import logging
 
@@ -11,11 +11,14 @@ from mirar.catalog.vizier.base_vizier_catalog import VizierCatalog
 
 class Gaia(VizierCatalog):
     """
-    PanStarrs 1 catalog
+    Gaia DR3 1 catalog
     """
 
-    catalog_vizier_code = "II/349"
-    abbreviation = "ps1"
+    catalog_vizier_code = "I/355/gaiadr3"
+    abbreviation = "gaiadr3"
 
     ra_key = "RAJ2000"
     dec_key = "DEJ2000"
+    
+    # def filter_catalog(self, table: astropy.table.Table) -> astropy.table.Table:
+    #     return super().filter_catalog(table)

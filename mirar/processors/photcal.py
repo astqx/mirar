@@ -157,7 +157,7 @@ class PhotCalibrator(BaseProcessorWithCrossMatch):
         matched_img_cat, matched_ref_cat, _ = self.xmatch_catalogs(
             ref_cat=ref_cat,
             image_cat=clean_img_cat,
-            crossmatch_radius_arcsec=self.crossmatch_radius_arcsec,
+            crossmatch_radius_arcsec=self.crossmatch_radius_arcsec, #2-3 arcsec
         )
         logger.debug(
             f"Cross-matched {len(matched_img_cat)} sources from catalog to the image."
@@ -249,7 +249,7 @@ class PhotCalibrator(BaseProcessorWithCrossMatch):
         phot_output_dir = self.get_phot_output_dir()
         phot_output_dir.mkdir(parents=True, exist_ok=True)
 
-        for image in batch:
+        for image in batch: 
             ref_cat, _, cleaned_img_cat = self.setup_catalogs(image)
 
             fwhm_med, _, fwhm_std, med_fwhm_pix, _, _ = get_fwhm(cleaned_img_cat)
