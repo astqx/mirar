@@ -324,9 +324,13 @@ class PhotCalibrator(BaseProcessorWithCrossMatch):
                     image[f"MAGLIM_{np.rint(diam)}"] = limmags[ind]
                 image[MAGLIM_KEY] = limmags[-1]
 
+                # [!] ERROR
                 image[ZP_KEY] = image["ZP_AUTO"]
-                image[ZP_STD_KEY] = image["ZP_AUTO_STD"]
-                image[ZP_NSTARS_KEY] = image["ZP_AUTO_NSTARS"]
+                # image[ZP_STD_KEY] = image["ZP_AUTO_STD"]
+                image[ZP_STD_KEY] = image["ZP_AUTO_std"]
+                # image[ZP_NSTARS_KEY] = image["ZP_AUTO_NSTARS"]
+                image[ZP_NSTARS_KEY] = image["ZP_AUTO_nstars"]
+                # [!] 
                 image["MAGSYS"] = "AB"
 
         return batch
