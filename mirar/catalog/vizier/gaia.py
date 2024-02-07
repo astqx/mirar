@@ -8,10 +8,9 @@ from astropy.table import Table
 
 from mirar.catalog.vizier.base_vizier_catalog import VizierCatalog
 
-
 class Gaia(VizierCatalog):
     """
-    Gaia DR3 1 catalog
+    Gaia DR3 catalog
     """
 
     catalog_vizier_code = "I/355/gaiadr3"
@@ -19,6 +18,15 @@ class Gaia(VizierCatalog):
 
     ra_key = "RAJ2000"
     dec_key = "DEJ2000"
+    
+    UBVRI_GAIA_FILTERS = {
+        'U': 'BP',
+        'B': 'BP',
+        'V': 'G',
+        'R': 'RP',
+        'I': 'RP',
+        'None': 'G',
+    }
     
     # def filter_catalog(self, table: astropy.table.Table) -> astropy.table.Table:
     #     return super().filter_catalog(table)
