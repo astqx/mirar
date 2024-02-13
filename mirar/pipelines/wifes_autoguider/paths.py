@@ -1,0 +1,52 @@
+from mirar.processors.astromatic.sextractor.sextractor import sextractor_checkimg_map
+
+ACQ_KEY = 'acq'
+BGMED_KEY = 'BGMED'
+BGRMSMED_KEY = 'BGRMSMED'
+# SEGMPATH_KEY = 'SEGMPATH'
+SEGMPATH_KEY = sextractor_checkimg_map['SEGMENTATION']
+CONVPATH_KEY = 'CONVPATH'
+# BGPATH_KEY = 'BGPATH'
+BGPATH_KEY = sextractor_checkimg_map['BACKGROUND']
+BGRMSPATH_KEY = sextractor_checkimg_map['BACKGROUND_RMS']
+SEGMOBJ_KEY = 'SEGMOBJ'
+PSF_CUTOUTS_PATH_KEY = 'PCUTPATH'
+PSF_CUTOUTS_SIZE_KEY = 'PCUTSIZE'
+NPSFPATH_KEY = 'NPSFPATH'
+PIXSCALE_KEY = 'PIXSCALE'
+ZP_MAD_KEY = 'ZPMAD'
+SEEING_KEY = 'SEEING'
+PSFMODEL_FWHM_PIX_KEY = 'PSF_FWHM_PIX'
+PSFMODEL_FWHM_KEY = 'PSF_FWHM'
+PSFMODEL_FWHM_ARCSEC_KEY = 'PSF_FWHM_ARCSEC'
+PSFMODEL_FWHM_ERR_ARCSEC_KEY = 'PSF_FWHM_ERR_ARCSEC'
+PSFMODEL_ELLIPTICITY_KEY = 'PSF_ELLIPTICITY'
+OVERSAMPLE_KEY = 'OVERSAMPLE'
+XMATCH_NSTARS_KEY = 'XMATCH_NSTARS'
+PSF_COMMENT_KEY = 'PSF_COMMENT'
+SEGM_COMMENT_KEY = 'SEGM_COMMENT'
+FWHM_MED_KEY = "FWHM_MED"
+FWHM_MED_ARCSEC_KEY = "FWHM_MED_ARCSEC"
+FWHM_STD_KEY = "FWHM_STD"
+FWHM_STD_ARCSEC_KEY = "FWHM_STD_ARCSEC"
+FWHM_PIX_KEY = "FWHM_PIX"
+MAGSYS_KEY = "MAGSYS"
+
+OUTPUT_DIRS = {
+    'BKG': 'background',
+    'DET': 'detection',
+    'PSF_MODEL': 'psf_model',
+    'PHOTCAL': 'photcal',
+    'PSF_PHOT': 'psf_phot',
+    'APER_PHOT': 'aper_phot',
+    'LOG': 'log',
+    'CONF': 'config',
+    'RES': 'results',
+    'CAT': 'catalogs',
+    'XMAT': 'xmatch',
+    'SEE': 'seeing',
+    'MASK': 'mask',
+    'CAL': 'calibration',
+    'FLAT': 'flat',
+    'COSMIC': 'cosmic',
+}
