@@ -1,4 +1,4 @@
-from paths import *
+from mirar.pipelines.wifes_autoguider.paths import *
 
 import sys 
 import os
@@ -61,7 +61,7 @@ from pathlib import Path
 from copy import deepcopy
 
 # mirar
-from mirar.pipelines.wifes_autoguider.wifes_autoguider_pipeline import WifesAutoguiderPipeline
+# from mirar.pipelines.wifes_autoguider.wifes_autoguider_pipeline import WifesAutoguiderPipeline
 from mirar.processors.astromatic.sextractor.background_subtractor import (
     SextractorBkgSubtractor,
 )
@@ -130,10 +130,11 @@ from mirar.processors.base_processor import (
 # from mirar.processors.photometry.base_photometry import (
 #     BaseSourcePhotometry,
 # )
-from mirar.utils.pipeline_visualisation import flowify
+# from mirar.utils.pipeline_visualisation import flowify
 from mirar.io import (
     open_fits,
-    save_to_path
+    save_to_path,
+    save_fits,
 )
 from mirar.processors.base_processor import PrerequisiteError
 from mirar.processors.utils.image_selector import select_from_images
@@ -176,6 +177,12 @@ from mirar.processors.flat import (
     FlatCalibrator,
     MasterFlatCalibrator
 )
+from mirar.paths import get_output_dir
+from mirar.processors.base_processor import (
+    BaseProcessor,
+    ABC
+)
+from mirar.data.base_data import DataBatch
 
 # photutils
 from photutils.centroids import (
@@ -226,6 +233,7 @@ from astropy.modeling.fitting import (
 )
 from astropy.modeling.functional_models import Gaussian2D
 import warnings
+from reproject import reproject_interp
 
 logger = logging.getLogger(__name__)
 
@@ -234,6 +242,29 @@ sex_all_ground = CustomKernel(np.array([
     [2,4,2],
     [1,2,1]
 ]))
+
+class PrepareOutputDirectories(BaseProcessor, ABC):
+    """
+    Class to prepare all output directories
+    """
+    def __init__(
+        self,
+        output_dirs
+    ):
+        super().__init__()
+        self.output_dirs = output_dirs
+        
+    def _apply(
+        self, 
+        batch: DataBatch
+    ) -> DataBatch:
+        
+        for dir in self.output_dirs:
+            output_dir = get_output_dir(sub_dir=self.night_sub_dir,dir_root=dir)
+            output_dir.mkdir(exist_ok=True)
+            
+        return batch
+        
 
 def default_select_acquisition(
     images: ImageBatch,
@@ -257,16 +288,20 @@ def dump_object(data,path):
 def table_to_fake_image(table):
     return Image(data=np.zeros([1,1]),header=table.get_metadata())
 
+def gaussian_fwhm_2d(std_x,std_y):
+    return 2*(np.log(2)*(std_x**2 + std_y**2))**0.5
+
 def fwhm_from_gaussian(
     table: SourceTable,
-    fitted_model: Gaussian2D
+    fitted_model: Gaussian2D,
+    fitter = None,
 ) -> SourceTable:
     pix_scale = table[PIXSCALE_KEY]
 
-    std_x = fitted_model.x_stddev
-    std_y = fitted_model.y_stddev
+    std_x = fitted_model.x_stddev.value
+    std_y = fitted_model.y_stddev.value
 
-    fwhm_pix = 2*np.sqrt(np.log(2)*(std_x**2 + std_y**2))
+    fwhm_pix = gaussian_fwhm_2d(std_x,std_y)
     fwhm_deg = fwhm_pix*pix_scale 
     fwhm_arcsec = fwhm_deg*3600
     
@@ -278,7 +313,26 @@ def fwhm_from_gaussian(
     table[PSFMODEL_FWHM_PIX_KEY] = fwhm_pix
     table[PSFMODEL_FWHM_KEY] = fwhm_deg
     table[PSFMODEL_FWHM_ARCSEC_KEY] = fwhm_arcsec
-    table[PSFMODEL_FWHM_ERR_ARCSEC_KEY] = None #TODO
+    table[PSFMODEL_AMP_KEY] = fitted_model.amplitude
+    table[PSFMODEL_X_POS_KEY] = fitted_model.x_mean
+    table[PSFMODEL_Y_POS_KEY] = fitted_model.y_mean
+    table[PSFMODEL_X_STD_KEY] = fitted_model.x_stddev
+    table[PSFMODEL_Y_STD_KEY] = fitted_model.y_stddev
+    
+    if fitter is not None:
+        cov_matrix = fitter.fit_info.param_cov
+        param_uncertainty = np.sqrt(np.diag(cov_matrix))
+        std_x = ufloat(fitted_model.x_stddev.value,param_uncertainty[-3])
+        std_y = ufloat(fitted_model.y_stddev.value,param_uncertainty[-2])
+        
+        fwhm_pix = gaussian_fwhm_2d(std_x,std_y)
+        fwhm_deg = fwhm_pix*pix_scale 
+        fwhm_arcsec = fwhm_deg*3600
+        
+        table[PSFMODEL_FWHM_ARCSEC_KEY] = fwhm_arcsec.n
+        table[PSFMODEL_FWHM_ERR_ARCSEC_KEY] = fwhm_arcsec.s
+        table[PSFMODEL_GFIT_KEY] = fitter.fit_info.optimality
+        table[PSFMODEL_STATUS_KEY] = fitter.fit_info.status
     
     return table
 
@@ -312,9 +366,11 @@ def save_night_log_seeing(
         FWHM_STD_ARCSEC_KEY, 
         FWHM_PIX_KEY,
         PSFMODEL_FWHM_ARCSEC_KEY, 
-        # PSFMODEL_FWHM_ERR_ARCSEC_KEY, 
+        PSFMODEL_FWHM_ERR_ARCSEC_KEY, 
         PSFMODEL_FWHM_PIX_KEY, 
         PSFMODEL_ELLIPTICITY_KEY,
+        PSFMODEL_GFIT_KEY,
+        PSFMODEL_STATUS_KEY,
         ZP_KEY,
         ZP_MAD_KEY,
         ZP_STD_KEY,
@@ -368,21 +424,29 @@ def scale_boxsize(box_size,header):
 
 def segmentation_image_to_mask(
     data: SegmentationImage | np.ndarray,
-    resample_function = None,
+    resampler = None,
+    resample_custom_function = None,
+    binning = None,
+    bin_size_map = None,
     **kwargs
 ) -> np.ndarray:
     if isinstance(data,SegmentationImage):
         data = data.data
-    data[data > 0] = 1
-    if resample_function is not None:
-        data = resample_function(data,**kwargs)
-    data[data == 0] = False
-    data[data != 0] = True
-    return data
+    if resampler is not None:
+        data = resample_custom_function(
+            image=data,
+            resampler=resampler,
+            binning=binning,
+            bin_size_map=bin_size_map
+        )
+    data = data > 0
+    return ~data
 
 def get_segmentation_mask(
     image: Image | SourceTable,
-    resample_function = None,
+    resampler = None,
+    resample_custom_function = None,
+    bin_size_map = None,
     # cache_dir: str | Path,
 ) -> np.ndarray:
     
@@ -394,7 +458,13 @@ def get_segmentation_mask(
     if SEGMOBJ_KEY in header.keys():
         segm = load_object(header[SEGMOBJ_KEY])
         binning = tuple(map(int,header['CCDSUM'].split(' ')))
-        return segmentation_image_to_mask(segm,resample_function=resample_function,factor=binning)
+        return segmentation_image_to_mask(
+            segm,
+            resampler=resampler,
+            resample_custom_function=resample_custom_function,
+            binning=binning,
+            bin_size_map=bin_size_map
+        )
     else:
         logger.info(f"segmentation image does not exist for {image[BASE_NAME_KEY]}")
         return np.zeros(image.get_data().shape).astype(bool)
@@ -430,13 +500,13 @@ def get_extended_mask(
     base_mask_function,
     extension_mask_function,
     *args,
-    resample_function = None,
+    extension_mask_function_kwargs = None,
     **kwargs
 ) -> np.ndarray:
     
-    mask = base_mask_function(image,resample_function)
-    mask_extended = extension_mask_function(mask,*args,**kwargs)
-    return mask_extended
+    mask = base_mask_function(image,*args,**kwargs)
+    mask_extended = extension_mask_function(mask,**extension_mask_function_kwargs)
+    return ~mask_extended
 
 def make_imshow_params(data):
     mean, std = np.nanmean(data), np.nanstd(data)
@@ -729,14 +799,15 @@ class PhotutilsBkgSubtractor(BaseImageProcessor):
                 save_path = output_dir.joinpath(save_name)
                 
                 save_data=eval('background.'+save_images[im])
-                if self.bzero_correction:
-                    save_data -= header['BZERO'] # TODO: also include scale
-                save_to_path(
-                    data=save_data,
-                    header=image.header,
-                    path=save_path,
-                    overwrite=True
-                )
+                if not self.bzero_correction: # TODO: also include scale  
+                    save_to_path(
+                        data=save_data,
+                        header=image.header,
+                        path=save_path,
+                        overwrite=True
+                    )
+                else:
+                    safe_safe_fits(Image(save_data,image.header),save_path)
                 image[im] = str(save_path)
             
             image.set_header(header)
@@ -901,6 +972,9 @@ class PhotutilsSourceFinder(BaseImageProcessor):
             
         return batch
 
+def get_binning(header):
+    return tuple(map(int,header['CCDSUM'].split(' ')))
+
 #TODO: multiple aperture
 class PhotutilsSourceCatalog(BaseSourceGenerator):
     """
@@ -923,11 +997,11 @@ class PhotutilsSourceCatalog(BaseSourceGenerator):
         error = None, # TODO: [somewhat done] maybe PhotutilsTotalErrorCalculator or calc_total_error internally
         mask = None,
         wcs = None, 
-        localbkg_width = 15, # default: 0, mirar: 15
+        localbkg_width = 15, # default: 0, mirar aper phot default: 15
         background = None,
         use_background = False,
         apermask_method = 'correct', # default from SE config
-        kron_params = [2.5, 3.5], # default from SE config
+        kron_params = [2.5, 1.5], # SE default # [2.5, 3.5] mirar default from SE config
         detection_cat = None,
         progress_bar: bool = False,
         make_psf_cutouts: bool = True,
@@ -936,6 +1010,7 @@ class PhotutilsSourceCatalog(BaseSourceGenerator):
         copy_image_keywords: str | list[str] = None,
         cache: bool = False,
         update_seeing: bool = False,
+        binning_correction: bool = False,
     ):    
         super().__init__()
         self.output_sub_dir = output_sub_dir
@@ -957,6 +1032,7 @@ class PhotutilsSourceCatalog(BaseSourceGenerator):
         self.background = background
         self.use_background = use_background
         self.update_seeing = update_seeing
+        self.binning_correction = binning_correction
         
     def failed_log(
         self, 
@@ -964,15 +1040,13 @@ class PhotutilsSourceCatalog(BaseSourceGenerator):
         comment = None
     ):
         if self.update_seeing:
-            # table["FWHM_MED"] = np.nan
-            # table["FWHM_STD"] = np.nan
-            # table["FWHM_PIX"] = np.nan
-            # table[ZP_KEY] = np.nan
-            # table[ZP_STD_KEY] = np.nan
-            # table[ZP_MAD_KEY] = np.nan
-            # table[ZP_NSTARS_KEY] = np.nan
-            # table[MAGSYS_KEY] = "AB"
             image[SEGM_COMMENT_KEY] = comment
+            
+    def get_binning(
+        self,
+        header
+    ):
+        return get_binning(header)
         
     def _apply_to_images(
         self,
@@ -1017,6 +1091,13 @@ class PhotutilsSourceCatalog(BaseSourceGenerator):
                 wcs = WCS(header=header)
             else:
                 wcs = self.wcs
+                
+            if self.binning_correction:
+                localbkg_width = np.round(
+                    self.localbkg_width/self.get_binning(header)[0]
+                )
+            else:
+                localbkg_width = self.localbkg_width
             
             srccat = SourceCatalog(
                 data=data,
@@ -1026,7 +1107,7 @@ class PhotutilsSourceCatalog(BaseSourceGenerator):
                 mask=get_mask(self.mask,header),
                 background=background,
                 wcs=wcs,
-                localbkg_width=self.localbkg_width,
+                localbkg_width=localbkg_width,
                 apermask_method=self.apermask_method,
                 kron_params = self.kron_params,
                 detection_cat = self.detection_cat,
@@ -1237,7 +1318,7 @@ class PhotutilsModelPSF(BaseSourceProcessor):
         fitter_kwargs=dict(),
         maxiters=10, 
         norm_radius=None, #5.5, 
-        recentering_boxsize=(5, 5), 
+        recentering_boxsize=None, # (5, 5), 
         center_accuracy=0.001, 
         sigma_clip=SigmaClip(
             sigma=3, 
@@ -1295,11 +1376,6 @@ class PhotutilsModelPSF(BaseSourceProcessor):
         comment = None
     ):
         if self.update_seeing:
-            table[PSFMODEL_FWHM_ARCSEC_KEY] = None
-            table[PSFMODEL_FWHM_ERR_ARCSEC_KEY] = None
-            table[PSFMODEL_FWHM_KEY] = None
-            table[PSFMODEL_FWHM_PIX_KEY] = None
-            table[PSFMODEL_ELLIPTICITY_KEY] = None
             table[PSF_COMMENT_KEY] = comment
     
     # source: FLOWS
@@ -1401,6 +1477,13 @@ class PhotutilsModelPSF(BaseSourceProcessor):
                 norm_radius = max(fwhm_med, 5)
             else:
                 norm_radius = self.norm_radius
+                
+            if self.recentering_boxsize is None:
+                recentering_boxsize = max(int(np.round(2 * fwhm_med)), 5)
+                if recentering_boxsize % 2 == 0:
+                    recentering_boxsize += 1
+            else:
+                recentering_boxsize = self. recentering_boxsize
             
             epsf_builder = EPSFBuilder(
                 oversampling=self.oversampling,
@@ -1411,7 +1494,7 @@ class PhotutilsModelPSF(BaseSourceProcessor):
                 fitter=fitter,
                 maxiters=self.maxiters,
                 norm_radius=norm_radius,
-                recentering_boxsize=self.recentering_boxsize,
+                recentering_boxsize=recentering_boxsize,
                 center_accuracy=self.center_accuracy,
                 sigma_clip=self.sigma_clip,
                 progress_bar=self.progress_bar
@@ -1733,7 +1816,7 @@ class SeeingCalculator(BaseSourceProcessor):
     def fit_gaussian(
         self,
         table: SourceTable,
-    ) -> Gaussian2D:
+    ):
             
         prec = table[OVERSAMPLE_KEY]
         size = self.model_size*prec
@@ -1758,7 +1841,7 @@ class SeeingCalculator(BaseSourceProcessor):
             save_path = output_dir.joinpath(table[BASE_NAME_KEY].replace('fits','psf_fitted_gaussian.pkl'))
             dump_object(fitted_model,save_path)
         
-        return fitted_model
+        return fitted_model, fitter
         
     def _apply_to_sources(
         self,
@@ -1770,9 +1853,11 @@ class SeeingCalculator(BaseSourceProcessor):
         for table in batch:
             
             if OVERSAMPLE_KEY in table.get_metadata().keys():
+                fitted_model, fitter = self.fit_gaussian(table)
                 table_updated = fwhm_from_gaussian(
                     table=table,
-                    fitted_model=self.fit_gaussian(table)
+                    fitter=fitter,
+                    fitted_model=fitted_model
                 )
             else:
                 table[PSFMODEL_ELLIPTICITY_KEY] = None
@@ -1784,7 +1869,7 @@ class SeeingCalculator(BaseSourceProcessor):
                 
                 table_updated = table
                 
-            output_dir = self.night_sub_dir
+            output_dir = get_output_dir(sub_dir=self.night_sub_dir,dir_root=self.output_sub_dir)
             save_night_log_seeing(
                 table_updated,
                 output_dir,
@@ -1817,10 +1902,48 @@ class SourceBatchToImageBatch(BaseSourceProcessor):
             
         return image_batch
 
-class MasterImageSaver(ImageSaver):
+def safe_safe_fits(
+    image: Image,
+    path: str | Path,
+):
+    header = image.get_header()
+    if 'BZERO' in header.keys():
+        image = Image(image.get_data() - header['BZERO'], header)
+        
+    save_fits(image, path)    
+
+class ImageSaverSafe(ImageSaver):
     
-    def __init__(self):
-        super().__init__(self)
+    def __init__(
+        self,
+        *args,
+        **kwargs
+    ):
+        super().__init__(*args,**kwargs)
+        
+    def save_fits(
+        self,
+        image: Image,
+        path: str | Path,
+    ):
+        
+        safe_safe_fits(image,path)
+
+class FlatCalibratorSafe(FlatCalibrator):
+    def __init__(
+        self,
+        *args,
+        **kwargs
+    ):
+        super().__init__(*args,**kwargs)
+        
+    def save_fits(
+        self,
+        image: Image,
+        path: str | Path,
+    ):
+    
+        safe_safe_fits(image,path)
 
 wifes_autoguider_bin_size_map = {
     (1,1): {
@@ -1871,6 +1994,66 @@ def upsampler(
     arr_up = arr_up.repeat(factor[1], axis=1)/factor[1]
     return arr_up
 
+def upsample(
+    image: Image | np.ndarray,
+    resampler,
+    bin_size_map,
+    binning = None,
+) -> Image | np.ndarray | None:
+    
+    if isinstance(image, Image):
+        data = image.get_data()
+        header = image.get_header()
+        binning = tuple(map(int,header['CCDSUM'].split(' ')))
+    elif isinstance(image, np.ndarray):
+        data = image
+        binning = binning
+        
+    size = data.shape
+    
+    if binning in bin_size_map.keys() and bin_size_map[binning]['size'] == size:
+        crop = bin_size_map[binning]['crop']
+        image_resamp = resampler(data,binning)
+        image_resamp = image_resamp[
+            crop[0][0]:crop[0][1],
+            crop[1][0]:crop[1][1],
+        ]
+        if isinstance(image, Image):
+            return Image(image_resamp,fits.Header(header))
+        elif isinstance(image, np.ndarray):
+            return image_resamp
+    else:
+        return None
+    
+def downsample(
+    image: Image,
+    resampler,
+    bin_size_map,
+) -> Image | None:
+    
+    data = image.get_data()
+    header = image.get_header()
+    binning = tuple(map(int,header['CCDSUM'].split(' ')))
+    
+    if binning in bin_size_map.keys():
+        crop = np.array(bin_size_map[binning]['crop'])
+        crop[crop == None] = 0
+        pad = np.abs(crop)
+        
+        data_padded = np.pad(
+            data,
+            (
+                (pad[0][0],pad[0][1]),
+                (pad[1][0],pad[1][1]),
+            ),
+            mode='constant',
+            constant_values=(np.nan,)
+        )
+        data_resamp = resampler(data_padded,binning)
+        return Image(data_resamp,fits.Header(header))
+    else:
+        return None
+
 class WifesAutoguiderImageResampler(BaseImageProcessor):
     
     base_key = 'wifes_autoguider_image_resampler'
@@ -1893,49 +2076,22 @@ class WifesAutoguiderImageResampler(BaseImageProcessor):
         image: Image
     ) -> Image | None:
         
-        data = image.get_data()
-        header = image.get_header()
-        binning = tuple(map(int,header['CCDSUM'].split(' ')))
-        size = data.shape
-        
-        if binning in self.bin_size_map.keys() and self.bin_size_map[binning]['size'] == size:
-            crop = self.bin_size_map[binning]['crop']
-            image_resamp = self.upsampler(data,binning)
-            image_resamp = image_resamp[
-                crop[0][0]:crop[0][1],
-                crop[1][0]:crop[1][1],
-            ]
-            return Image(image_resamp,fits.Header(header))
-        else:
-            return None
+        return upsample(
+            image,
+            self.upsampler,
+            self.bin_size_map
+        )
         
     def downsample(
         self,
         image: Image
     ) -> Image | None:
         
-        data = image.get_data()
-        header = image.get_header()
-        binning = tuple(map(int,header['CCDSUM'].split(' ')))
-        
-        if binning in self.bin_size_map.keys():
-            crop = np.array(self.bin_size_map[binning]['crop'])
-            crop[crop == None] = 0
-            pad = np.abs(crop)
-            
-            data_padded = np.pad(
-                data,
-                (
-                    (pad[0][0],pad[0][1]),
-                    (pad[1][0],pad[1][1]),
-                ),
-                mode='constant',
-                constant_values=(np.nan,)
-            )
-            data_resamp = self.downsampler(data_padded,binning)
-            return Image(data_resamp,fits.Header(header))
-        else:
-            return None
+        return downsample(
+            image,
+            self.downsampler,
+            self.bin_size_map
+        )
         
     def _apply_to_images(
         self,

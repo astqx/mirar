@@ -1,4 +1,5 @@
-from processors import *
+from mirar.pipelines.wifes_autoguider.processors import *
+from mirar.pipelines.wifes_autoguider.paths import *
 
 load = [
     ImageLoader(load_image=load_wifes_guider_image)
@@ -96,6 +97,7 @@ test_config = list(itertools.chain(
 ))
 
 prod_config = [
+    PrepareOutputDirectories(output_dirs=OUTPUT_DIRS.values()),
     ImageLoader(load_image=load_wifes_guider_image),
     MaskPixelsFromFunction(
         mask_function = make_bad_pix_mask,
@@ -118,7 +120,7 @@ prod_config = [
         sample='down',
         downsampler=downsampler
     ),
-    ImageSaver(output_dir_name=OUTPUT_DIRS['FLAT']), # !! needs to be removed !!
+    ImageSaverSafe(output_dir_name=OUTPUT_DIRS['FLAT']), # !! needs to be removed !!
     PhotutilsBkgSubtractor(
         box_size=(32,32),
         select_images=default_select_acquisition,
@@ -127,9 +129,9 @@ prod_config = [
         save_bkg=False,
         coverage_mask_as_mask=True,
         box_size_scale_function=scale_boxsize,
-        bzero_correction=False,
+        bzero_correction=True,
     ),
-    ImageSaver(output_dir_name=OUTPUT_DIRS['BKG']), # LATEST_SAVE_KEY
+    ImageSaverSafe(output_dir_name=OUTPUT_DIRS['BKG']), # LATEST_SAVE_KEY
     PhotutilsSourceFinder(
         convolve=True,
         convolution_kernel=sex_all_ground,
@@ -141,7 +143,8 @@ prod_config = [
     PhotutilsSourceCatalog(
         make_psf_cutouts=False,
         use_background=False,
-        output_sub_dir=OUTPUT_DIRS['DET']
+        output_sub_dir=OUTPUT_DIRS['DET'],
+        binning_correction=True,
     ),
     SourceWriter(OUTPUT_DIRS['DET']), # !! needs to be removed !!
     SourceCrossMatch(
@@ -194,7 +197,8 @@ prod_config = [
 ]
 
 master_flat_config = [
-    ImageLoader(input_sub_dir=RAW_DIR, input_img_dir=TEST_DIR, load_image=load_wifes_guider_image),
+    PrepareOutputDirectories(output_dirs=OUTPUT_DIRS.values()),
+    ImageLoader(load_image=load_wifes_guider_image),
     MaskPixelsFromFunction(
         mask_function = make_bad_pix_mask,
         write_masked_pixels_to_file = True,
@@ -205,7 +209,7 @@ master_flat_config = [
         effective_gain_key = GAIN_KEY,
         readnoise=0 # TODO: check
     ),
-    ImageSaver(output_dir_name=OUTPUT_DIRS['COSMIC']),
+    ImageSaverSafe(output_dir_name=OUTPUT_DIRS['COSMIC']), # -->
     PhotutilsBkgSubtractor(
         box_size=(32,32),
         select_images=default_select_acquisition,
@@ -229,29 +233,35 @@ master_flat_config = [
         use_background=False,
         output_sub_dir=OUTPUT_DIRS['DET']
     ),
-    SourceBatchToImageBatch(),
+    SourceBatchToImageBatch(), # <--
     # ImageBatcher(["FILTER"]), #TODO: future
+    WifesAutoguiderImageResampler(
+        sample='up',
+        upsampler=upsampler
+    ),
     MaskPixelsFromFunction(
         mask_function = lambda image: get_extended_mask(
             image=image,
             base_mask_function=get_segmentation_mask,
             extension_mask_function=invert_adjacent_to_false,
-            resample_function=upsampler,
-            radius=5
+            extension_mask_function_kwargs = {'radius': 5},
+            resampler=upsampler,
+            resample_custom_function=upsample,
+            bin_size_map=wifes_autoguider_bin_size_map,
         ),
+        write_masked_pixels_to_file = True,
+        output_dir = OUTPUT_DIRS['FLAT'],
+        
     ),
-    WifesAutoguiderImageResampler(
-        sample='up',
-        upsampler=upsampler
-    ),
-    FlatCalibrator(
+    FlatCalibratorSafe(
         select_flat_images=default_select_acquisition
     ),
-    ImageSaver(output_dir_name=OUTPUT_DIRS['FLAT']),
+    ImageSaverSafe(output_dir_name=OUTPUT_DIRS['FLAT']),
+    
 ]
 
 resample_test_config = [
-    ImageLoader(input_sub_dir=RAW_DIR, input_img_dir=TEST_DIR, load_image=load_wifes_guider_image),
+    ImageLoader(load_image=load_wifes_guider_image),
     WifesAutoguiderImageResampler(
         sample='up',
         upsampler=upsampler

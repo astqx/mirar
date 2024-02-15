@@ -9,6 +9,7 @@ from mirar.pipelines.sedmv2.sedmv2_pipeline import SEDMv2Pipeline
 from mirar.pipelines.summer.summer_pipeline import SummerPipeline
 from mirar.pipelines.winter.winter_pipeline import WINTERPipeline
 from mirar.pipelines.wirc.wirc_pipeline import WircPipeline
+from mirar.pipelines.wifes_autoguider.wifes_autoguider_pipeline import WifesAutoguiderPipeline
 
 logger = logging.getLogger(__name__)
 

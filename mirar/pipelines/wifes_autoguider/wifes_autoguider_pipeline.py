@@ -15,8 +15,12 @@ class WifesAutoguiderPipeline(Pipeline):
     
     non_linear_level = 99999
     
+    # all_pipeline_configurations = {}
+    
     all_pipeline_configurations = {
+        "default": prod_config,
         "prod_config": prod_config,
         "master_flat_config": master_flat_config
     }
+    
     
