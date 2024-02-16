@@ -8,6 +8,7 @@ build:
     post_create_environment:
       - echo "Command run at 'post_create_environment' step"
       - python -m pip install --upgrade --no-cache-dir pip setuptools
+      - pip install sphinx-rtd-theme
       - pip install -e .
 
 sphinx:
