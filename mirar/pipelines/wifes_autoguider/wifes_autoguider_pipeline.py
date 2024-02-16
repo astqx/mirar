@@ -2,7 +2,8 @@ import logging
 from mirar.pipelines.base_pipeline import Pipeline
 from mirar.pipelines.wifes_autoguider.blocks import (
     prod_config,
-    master_flat_config
+    master_flat_config,
+    bkg_sub_test
 )
 
 PIPELINE_NAME = "wifes_autoguider"
@@ -20,7 +21,8 @@ class WifesAutoguiderPipeline(Pipeline):
     all_pipeline_configurations = {
         "default": prod_config,
         "prod_config": prod_config,
-        "master_flat_config": master_flat_config
+        "master_flat_config": master_flat_config,
+        "bkg_sub_test": bkg_sub_test
     }
     
     

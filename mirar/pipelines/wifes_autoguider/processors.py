@@ -205,7 +205,6 @@ from photutils.psf import EPSFBuilder
 
 import astropy
 from photutils.background.interpolators import BkgZoomInterpolator
-from photutils.background import Background2D
 from photutils.background.core import (
     SExtractorBackground,
     StdBackgroundRMS
@@ -247,6 +246,9 @@ class PrepareOutputDirectories(BaseProcessor, ABC):
     """
     Class to prepare all output directories
     """
+    
+    base_key = 'prepare_output_dirs'
+    
     def __init__(
         self,
         output_dirs
@@ -1824,7 +1826,10 @@ class SeeingCalculator(BaseSourceProcessor):
         center = (size//2/prec,size//2/prec)
 
         psfmodel = load_object(table[NPSFPATH_KEY])
-        psf_array = psfmodel.evaluate(x,y,1,*center)
+        if psfmodel is not None: # check if PSF model exists
+            psf_array = psfmodel.evaluate(x,y,1,*center)
+        else:
+            return None
         
         model = Gaussian2D(
             amplitude=np.max(psf_array),
@@ -1842,6 +1847,19 @@ class SeeingCalculator(BaseSourceProcessor):
             dump_object(fitted_model,save_path)
         
         return fitted_model, fitter
+    
+    def failed_log(
+        self,
+        table: SourceTable
+    ):
+        table[PSFMODEL_ELLIPTICITY_KEY] = None
+        table[PSFMODEL_ELLIPTICITY_KEY] = None
+        table[PSFMODEL_FWHM_PIX_KEY] = None
+        table[PSFMODEL_FWHM_KEY] = None
+        table[PSFMODEL_FWHM_ARCSEC_KEY] = None
+        table[PSFMODEL_FWHM_ERR_ARCSEC_KEY] = None
+        
+        return table
         
     def _apply_to_sources(
         self,
@@ -1853,22 +1871,18 @@ class SeeingCalculator(BaseSourceProcessor):
         for table in batch:
             
             if OVERSAMPLE_KEY in table.get_metadata().keys():
-                fitted_model, fitter = self.fit_gaussian(table)
-                table_updated = fwhm_from_gaussian(
-                    table=table,
-                    fitter=fitter,
-                    fitted_model=fitted_model
-                )
+                fit_return = self.fit_gaussian(table)
+                if fit_return is not None:
+                    fitted_model, fitter = fit_return
+                    table_updated = fwhm_from_gaussian(
+                        table=table,
+                        fitter=fitter,
+                        fitted_model=fitted_model
+                    )
+                else:
+                    table_updated = self.failed_log(table)
             else:
-                table[PSFMODEL_ELLIPTICITY_KEY] = None
-                table[PSFMODEL_ELLIPTICITY_KEY] = None
-                table[PSFMODEL_FWHM_PIX_KEY] = None
-                table[PSFMODEL_FWHM_KEY] = None
-                table[PSFMODEL_FWHM_ARCSEC_KEY] = None
-                table[PSFMODEL_FWHM_ERR_ARCSEC_KEY] = None
-                
-                table_updated = table
-                
+                table_updated = self.failed_log(table)
             output_dir = get_output_dir(sub_dir=self.night_sub_dir,dir_root=self.output_sub_dir)
             save_night_log_seeing(
                 table_updated,

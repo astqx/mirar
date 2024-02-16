@@ -120,7 +120,7 @@ prod_config = [
         sample='down',
         downsampler=downsampler
     ),
-    ImageSaverSafe(output_dir_name=OUTPUT_DIRS['FLAT']), # !! needs to be removed !!
+    # ImageSaverSafe(output_dir_name=OUTPUT_DIRS['FLAT']), # !! needs to be removed !!
     PhotutilsBkgSubtractor(
         box_size=(32,32),
         select_images=default_select_acquisition,
@@ -146,7 +146,7 @@ prod_config = [
         output_sub_dir=OUTPUT_DIRS['DET'],
         binning_correction=True,
     ),
-    SourceWriter(OUTPUT_DIRS['DET']), # !! needs to be removed !!
+    # SourceWriter(OUTPUT_DIRS['DET']), # !! needs to be removed !!
     SourceCrossMatch(
         # ref_catalog_generator=WifesAutoguiderVisier(
         #     visier_catalog=Gaia,
@@ -192,8 +192,8 @@ prod_config = [
         output_sub_dir = OUTPUT_DIRS['SEE'],
         additional_cols=['OBSBLKID','PROPID','RA','DEC']
     ),
-    RemoveEmptySourceTables(), # !! needs to be removed !!
-    SourceWriter(output_dir_name=OUTPUT_DIRS['SEE']), # !! needs to be removed !!
+    # RemoveEmptySourceTables(), # !! needs to be removed !!
+    # SourceWriter(output_dir_name=OUTPUT_DIRS['SEE']), # !! needs to be removed !!
 ]
 
 master_flat_config = [
@@ -225,8 +225,8 @@ master_flat_config = [
         convolution_kernel=sex_all_ground,
         threshold_factor=3,
         output_sub_dir=OUTPUT_DIRS['DET'],
-        dev=True, # !! needs to be removed !!
-        dev_params=['cmap'], # !! needs to be removed !!
+        dev=False,
+        dev_params=['cmap'],
     ),
     PhotutilsSourceCatalog(
         make_psf_cutouts=False,
@@ -249,15 +249,53 @@ master_flat_config = [
             resample_custom_function=upsample,
             bin_size_map=wifes_autoguider_bin_size_map,
         ),
-        write_masked_pixels_to_file = True,
-        output_dir = OUTPUT_DIRS['FLAT'],
-        
+        # write_masked_pixels_to_file = True,
+        # output_dir = OUTPUT_DIRS['FLAT'],
     ),
     FlatCalibratorSafe(
         select_flat_images=default_select_acquisition
     ),
-    ImageSaverSafe(output_dir_name=OUTPUT_DIRS['FLAT']),
-    
+    # ImageSaverSafe(output_dir_name=OUTPUT_DIRS['FLAT']),
+]
+
+bkg_sub_test = [
+    PrepareOutputDirectories(output_dirs=OUTPUT_DIRS.values()),
+    ImageLoader(load_image=load_wifes_guider_image),
+    PrepareOutputDirectories(output_dirs=OUTPUT_DIRS.values()),
+    ImageLoader(load_image=load_wifes_guider_image),
+    MaskPixelsFromFunction(
+        mask_function = make_bad_pix_mask,
+        write_masked_pixels_to_file = True,
+        output_dir = OUTPUT_DIRS['MASK'],
+        # only_write_mask=True,
+    ),
+    LACosmicCleaner(
+        effective_gain_key = GAIN_KEY,
+        readnoise=0 # TODO: check
+    ),
+    WifesAutoguiderImageResampler( # TODO: > 3 binning
+        sample='up',
+        upsampler=upsampler
+    ),
+    MasterFlatCalibrator(
+        master_image_path=get_master_flat()
+    ),
+    WifesAutoguiderImageResampler(
+        sample='down',
+        downsampler=downsampler
+    ),
+    ImageSaverSafe(output_dir_name=OUTPUT_DIRS['FLAT']), # !! needs to be removed !!
+    PhotutilsBkgSubtractor(
+        box_size=(32,32),
+        select_images=default_select_acquisition,
+        output_sub_dir=OUTPUT_DIRS['BKG'],
+        dev=True,
+        save_bkg=True,
+        coverage_mask_as_mask=True,
+        box_size_scale_function=scale_boxsize,
+        bzero_correction=True,
+    ),
+    ImageSaverSafe(output_dir_name=OUTPUT_DIRS['BKG']), # LATEST_SAVE_KEY
 ]
 
 resample_test_config = [
