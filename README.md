@@ -12,3 +12,5 @@
 Open-source modular python package for astronomy image reduction.
 
 Check out our [documentation](https://mirar.readthedocs.io/en/latest/?badge=latest) to learn more.
+
+Fork: [![Documentation Status](https://readthedocs.org/projects/mirar-anu/badge/?version=latest)](https://mirar-anu.readthedocs.io/en/latest/?badge=latest)
